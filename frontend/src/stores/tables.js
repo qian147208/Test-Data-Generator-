@@ -1,216 +1,134 @@
-// 表状态管理
 import { defineStore } from 'pinia'
-import { getTablesApi, getTableDetailsApi, getTableDependenciesApi } from '@/api/tables'
+import { ref, computed } from 'vue'
+import { tables } from '@/api'
 
-export const useTablesStore = defineStore('tables', {
-  state: () => ({
-    // 表列表
-    tables: [],
-    // 当前选中的表
-    currentTable: null,
-    // 加载状态
-    loading: false,
-    // 表详情缓存
-    tableDetails: {},
-    // 表依赖关系缓存
-    tableDependencies: {},
-    // 搜索关键词
-    searchKeyword: '',
-  }),
+export const useTablesStore = defineStore('tables', () => {
+  const tablesList = ref([])
+  const currentTable = ref(null)
+  const loading = ref(false)
+  const tableDetails = ref({})
+  const tableDependencies = ref({})
+  const searchKeyword = ref('')
 
-  getters: {
-    // 过滤后的表列表
-    filteredTables: (state) => {
-      if (!state.searchKeyword) {
-        return state.tables
-      }
-      const keyword = state.searchKeyword.toLowerCase()
-      return state.tables.filter(table => {
-        const tableName = (table.name || table.table_name || '').toLowerCase()
-        const comment = (table.comment || table.table_comment || '').toLowerCase()
-        return tableName.includes(keyword) || comment.includes(keyword)
-      })
-    },
+  const filteredTables = computed(() => {
+    if (!searchKeyword.value) return tablesList.value
+    const keyword = searchKeyword.value.toLowerCase()
+    return tablesList.value.filter(t => {
+      const name = (t.table_name || '').toLowerCase()
+      const comment = (t.comment || '').toLowerCase()
+      return name.includes(keyword) || comment.includes(keyword)
+    })
+  })
 
-    // 当前表详情
-    currentTableDetails: (state) => {
-      if (!state.currentTable) return null
-      const tableName = state.currentTable.name || state.currentTable.table_name
-      return state.tableDetails[tableName] || null
-    },
+  const currentTableDetails = computed(() => {
+    if (!currentTable.value) return null
+    return tableDetails.value[currentTable.value.table_name] || null
+  })
 
-    // 当前表依赖关系
-    currentTableDependencies: (state) => {
-      if (!state.currentTable) return null
-      const tableName = state.currentTable.name || state.currentTable.table_name
-      return state.tableDependencies[tableName] || null
-    },
-  },
+  const currentTableDependencies = computed(() => {
+    if (!currentTable.value) return null
+    return tableDependencies.value[currentTable.value.table_name] || null
+  })
 
-  actions: {
-    /**
-     * 获取表列表
-     */
-    async fetchTables() {
-      console.log('开始获取表列表...')
-      this.loading = true
-      try {
-        const data = await getTablesApi({
-          batchSize: 15,
-          onProgress: (progress) => {
-            console.log(`获取表列表进度: ${progress}%`)
-            // 可以在这里添加进度条更新逻辑
-          }
-        })
-        console.log('获取表列表响应:', data)
-        console.log('响应类型:', typeof data)
-        console.log('是否为数组:', Array.isArray(data))
-        this.tables = Array.isArray(data) ? data : (data.tables || [])
-        console.log('处理后的表列表:', this.tables)
-        console.log('表数量:', this.tables.length)
-        return this.tables
-      } catch (error) {
-        console.error('获取表列表失败:', error)
-        console.error('错误堆栈:', error.stack)
-        throw error
-      } finally {
-        this.loading = false
-        console.log('获取表列表完成')
-      }
-    },
+  const fetchTables = async () => {
+    loading.value = true
+    try {
+      const data = await tables.getAll()
+      tablesList.value = Array.isArray(data) ? data : []
+      return tablesList.value
+    } catch (error) {
+      console.error('获取表列表失败:', error)
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
 
-    /**
-     * 防抖函数
-     */
-    debounce(func, wait) {
-      let timeout
-      return function executedFunction(...args) {
-        const later = () => {
-          clearTimeout(timeout)
-          func(...args)
-        }
-        clearTimeout(timeout)
-        timeout = setTimeout(later, wait)
-      }
-    },
+  const fetchTableDetails = async (tableName) => {
+    loading.value = true
+    try {
+      const data = await tables.getDetails(tableName)
+      tableDetails.value[tableName] = data
+      return data
+    } catch (error) {
+      console.error('获取表详情失败:', error)
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
 
-    /**
-     * 初始化防抖方法
-     */
-    initDebouncedMethods() {
-      // 防抖搜索
-      this.debouncedSearch = this.debounce((keyword) => {
-        this.searchTables(keyword)
-      }, 300)
-    },
+  const fetchTableDependencies = async (tableName) => {
+    try {
+      const data = await tables.getDependencies(tableName)
+      tableDependencies.value[tableName] = data
+      return data
+    } catch (error) {
+      console.warn('获取依赖关系失败:', error)
+    }
+  }
 
-    /**
-     * 获取表详情
-     * @param {string} tableName - 表名
-     */
-    async fetchTableDetails(tableName) {
-      this.loading = true
-      try {
-        const data = await getTableDetailsApi(tableName)
-        this.tableDetails[tableName] = data
-        return data
-      } catch (error) {
-        console.error('获取表详情失败:', error)
-        throw error
-      } finally {
-        this.loading = false
-      }
-    },
+  const selectTable = async (table) => {
+    currentTable.value = table
+    const tableName = table.table_name
+    const requests = []
 
-    /**
-     * 获取表依赖关系
-     * @param {string} tableName - 表名
-     */
-    async fetchTableDependencies(tableName) {
-      try {
-        const data = await getTableDependenciesApi(tableName)
-        this.tableDependencies[tableName] = data
-        return data
-      } catch (error) {
-        console.error('获取表依赖关系失败:', error)
-        throw error
-      }
-    },
+    if (!tableDetails.value[tableName]) {
+      requests.push(fetchTableDetails(tableName))
+    }
+    if (!tableDependencies.value[tableName]) {
+      requests.push(fetchTableDependencies(tableName).catch(err => console.warn(err)))
+    }
 
-    /**
-     * 选中表
-     * @param {Object} table - 表对象
-     */
-    async selectTable(table) {
-      this.currentTable = table
-      const tableName = table.table_name
-
-      // 批量获取表详情和依赖关系，避免多次单独请求
-      const requests = []
-      
-      // 如果没有缓存，则获取详情
-      if (!this.tableDetails[tableName]) {
-        requests.push(this.fetchTableDetails(tableName))
-      }
-
-      // 获取依赖关系
-      if (!this.tableDependencies[tableName]) {
-        requests.push(
-          this.fetchTableDependencies(tableName).catch(error => {
-            // 依赖关系获取失败不影响主流程
-            console.warn('获取依赖关系失败:', error)
-          })
-        )
-      }
-
-      // 并行执行请求
-      if (requests.length > 0) {
-        await Promise.all(requests)
-      }
-    },
-
-    /**
-     * 批量获取表详情
-     * @param {Array} tableNames - 表名数组
-     */
-    async fetchBatchTableDetails(tableNames) {
-      const requests = tableNames.map(tableName => {
-        if (!this.tableDetails[tableName]) {
-          return this.fetchTableDetails(tableName).catch(error => {
-            console.warn(`获取表 ${tableName} 详情失败:`, error)
-          })
-        }
-        return Promise.resolve()
-      })
-      
+    if (requests.length > 0) {
       await Promise.all(requests)
-    },
+    }
+  }
 
-    /**
-     * 搜索表
-     * @param {string} keyword - 搜索关键词
-     */
-    searchTables(keyword) {
-      this.searchKeyword = keyword
-    },
+  const fetchBatchTableDetails = async (tableNames) => {
+    await Promise.all(
+      tableNames.map(name =>
+        !tableDetails.value[name]
+          ? fetchTableDetails(name).catch(err => console.warn(`获取 ${name} 详情失败:`, err))
+          : Promise.resolve()
+      )
+    )
+  }
 
-    /**
-     * 清除当前选中
-     */
-    clearCurrentTable() {
-      this.currentTable = null
-    },
+  const searchTables = (keyword) => {
+    searchKeyword.value = keyword
+  }
 
-    /**
-     * 重置状态
-     */
-    reset() {
-      this.tables = []
-      this.currentTable = null
-      this.loading = false
-      this.tableDetails = {}
-      this.tableDependencies = {}
-      this.searchKeyword = ''
-    },
-  },
+  const clearCurrentTable = () => {
+    currentTable.value = null
+  }
+
+  const reset = () => {
+    tablesList.value = []
+    currentTable.value = null
+    loading.value = false
+    tableDetails.value = {}
+    tableDependencies.value = {}
+    searchKeyword.value = ''
+  }
+
+  return {
+    tables: tablesList,
+    currentTable,
+    loading,
+    tableDetails,
+    tableDependencies,
+    searchKeyword,
+    filteredTables,
+    currentTableDetails,
+    currentTableDependencies,
+    fetchTables,
+    fetchTableDetails,
+    fetchTableDependencies,
+    selectTable,
+    fetchBatchTableDetails,
+    searchTables,
+    clearCurrentTable,
+    reset
+  }
 })
