@@ -15,15 +15,20 @@ export const useConnectionStore = defineStore('connection', () => {
       error.value = null
 
       const response = await connection.connect(connectionConfig)
-      connected.value = response.connected
+
+      if (!response.connected) {
+        connected.value = false
+        error.value = response.message || '连接失败'
+        return { success: false, message: error.value }
+      }
+
+      connected.value = true
       config.value = connectionConfig
       connectionInfo.value = response
 
-      if (response.connected) {
-        const { useTablesStore } = await import('./tables')
-        const tablesStore = useTablesStore()
-        await tablesStore.fetchTables()
-      }
+      const { useTablesStore } = await import('./tables')
+      const tablesStore = useTablesStore()
+      await tablesStore.fetchTables()
 
       return { success: true }
     } catch (err) {
@@ -43,13 +48,16 @@ export const useConnectionStore = defineStore('connection', () => {
 
       const response = await connection.disconnect()
 
-      if (response.success) {
-        connected.value = false
-        config.value = null
-        connectionInfo.value = null
-        const { useTablesStore } = await import('./tables')
-        useTablesStore().reset()
+      if (!response.success) {
+        error.value = response.message || '断开连接失败'
+        return { success: false, message: error.value }
       }
+
+      connected.value = false
+      config.value = null
+      connectionInfo.value = null
+      const { useTablesStore } = await import('./tables')
+      useTablesStore().reset()
 
       return { success: true }
     } catch (err) {
